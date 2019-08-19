@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: basic-user-pass-1
+  namespace: morfies
+  annotations:
+    tekton.dev/docker-0: index.docker.io
+type: kubernetes.io/basic-auth
+stringData:
+  username: myname
+  password: mypass
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: basic-user-pass-0
+  namespace: morfies
+  annotations:
+    tekton.dev/docker-0: https://x.y.com
+type: kubernetes.io/basic-auth
+stringData:
+  username: secretname
+  password: secretpass
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: basic-user-pass-2
+  namespace: morfies
+  annotations:
+    tekton.dev/git-0: https://git.inner.com
+type: kubernetes.io/basic-auth
+stringData:
+  username: xx@ing.com
+  password: pass
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: build-bot-1
+  namespace: morfies
+secrets:
+  - name: basic-user-pass-1
+  - name: basic-user-pass-2
+  - name: basic-user-pass-0
+
+---
+apiVersion: tekton.dev/v1alpha1
+kind: PipelineResource
+metadata:
+  name: skaffold-git-1
+  namespace: morfies
+spec:
+  type: git
+  params:
+    - name: revision
+      value: master
+    - name: url
+      value: https://github.com/GoogleContainerTools/skaffold
+
+---
+apiVersion: tekton.dev/v1alpha1
+kind: PipelineResource
+metadata:
+  name: my-node-image
+  namespace: morfies
+spec:
+  type: image
+  params:
+    - name: url
+      value: x.y.com/chefufe/fnodex:0.1
+
+---
+apiVersion: tekton.dev/v1alpha1
+kind: Task
+metadata:
+  name: build-docker-image-from-git-source-1
+  namespace: morfies
+spec:
+  inputs:
+    resources:
+      - name: docker-source-1
+        type: git
+    params:
+      - name: pathToDockerFile
+        description: The path to the dockerfile to build
+        default: /workspace/docker-source/Dockerfile
+      - name: pathToContext
+        description:
+          The build context used by Kaniko
+          (https://github.com/GoogleContainerTools/kaniko#kaniko-build-contexts)
+        default: /workspace/docker-source
+  outputs:
+    resources:
+      - name: builtImage1
+        type: image
+  steps:
+    - name: build-and-push
+      image: morfies/kaniko-executor
+      env:
+        - name: "DOCKER_CONFIG"
+          value: "/builder/home/.docker/"
+      command:
+        - /kaniko/executor
+      args:
+        - --dockerfile=${inputs.params.pathToDockerFile}
+        - --destination=${outputs.resources.builtImage1.url}
+        - --context=${inputs.params.pathToContext}
+
+---
+apiVersion: tekton.dev/v1alpha1
+kind: TaskRun
+metadata:
+  name: build-docker-image-from-git-source-task-run-1
+  namespace: morfies
+spec:
+  serviceAccount: build-bot-1
+  taskRef:
+    name: build-docker-image-from-git-source-1
+  inputs:
+    resources:
+      - name: docker-source-1
+        resourceRef:
+          name: skaffold-git-1
+    params:
+      - name: pathToDockerFile
+        value: Dockerfile
+      - name: pathToContext
+        value: /workspace/docker-source-1/examples/microservices/leeroy-web
+  outputs:
+    resources:
+      - name: builtImage1
+        resourceRef:
+          name: my-node-image
